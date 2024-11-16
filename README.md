@@ -19,3 +19,6 @@ Move the Dataset to HDFS
 
 3.Start Hive
 Launch Hive to begin working with your data:
+
+4.to check if files created and stored properly or not
+->(hadoop fs -ls /user/root/hr_data/)
