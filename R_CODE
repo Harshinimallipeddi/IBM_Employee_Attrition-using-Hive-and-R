@@ -1,0 +1,151 @@
+
+library(dplyr)       # For data manipulation
+library(caret)       # For ml tasks such as data splitting and model evaluation.
+library(randomForest)
+library(ggplot2)     # visualization
+library(e1071)       # For SVM
+library(pROC)   
+library(ggcorrplot)  # For correlation heatmap
+library(gridExtra)
+
+# Load Dataset and Prepare Data
+data <- read.csv("C:/Users/msate/Downloads/R_dataset.csv", stringsAsFactors = FALSE)
+data
+
+# Drop unnecessary columns
+data <- data %>% select(-EmployeeNumber, -Application.ID, -StandardHours, -EmployeeCount)
+
+# Remove rows with null (NA) values
+data <- na.omit(data)
+
+# Convert target variable 'Attrition' to a factor
+data$Attrition <- factor(data$Attrition)
+
+# Encode categorical variables as numeric
+categorical_cols <- c('BusinessTravel', 'Department', 'EducationField', 
+                      'Gender', 'JobRole', 'MaritalStatus', 'Over18', 
+                      'OverTime', 'Employee.Source', 'Education')
+data[categorical_cols] <- lapply(data[categorical_cols], factor)
+data[categorical_cols] <- lapply(data[categorical_cols], as.numeric)
+
+# V1: Distribution of Attrition
+ggplot(data, aes(x = Attrition, fill = Attrition)) +
+  geom_bar() +
+  labs(title = "Distribution of Attrition", x = "Attrition", y = "Count") +
+  scale_fill_manual(values = c("lightblue", "pink")) +
+  theme_minimal()
+
+# V2: Attrition Distribution by Gender
+
+ggplot(data, aes(x = Gender, fill = Attrition)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Attrition Distribution by Gender", x = "Gender", y = "Count") +
+  scale_fill_manual(values = c("lightblue", "pink")) +
+  theme_minimal()
+
+# V3: Distribution Plots (Single Variable - Age)
+
+ggplot(data, aes(x = Age)) +
+  geom_density(fill = "skyblue", alpha = 0.7) +
+  labs(title = "Distribution of Age", x = "Age", y = "Density") +
+  theme_minimal()
+
+# V4: Multiple Distribution Plots
+
+vars <- c("TotalWorkingYears", "MonthlyIncome", "YearsAtCompany", 
+          "DistanceFromHome", "YearsInCurrentRole", "YearsWithCurrManager", 
+          "YearsSinceLastPromotion", "PercentSalaryHike", "TrainingTimesLastYear")
+
+plots <- lapply(vars, function(var) {
+  ggplot(data, aes_string(x = var)) +
+    geom_density(fill = "skyblue", alpha = 0.7) +
+    labs(title = paste("Distribution of", var), x = var, y = "Density") +
+    theme_minimal()
+})
+
+do.call(grid.arrange, c(plots, ncol = 2))
+
+# V5: Categorical Features by Attrition
+categorical <- c('Attrition', 'BusinessTravel', 'Department', 'EducationField', 
+                 'Gender', 'OverTime', 'Employee.Source', 'MaritalStatus')
+
+categorical_plots <- lapply(categorical[-1], function(cat_var) {
+  ggplot(data, aes_string(x = cat_var, fill = "Attrition")) +
+    geom_bar(position = "dodge") +
+    labs(title = paste("Attrition by", cat_var), x = cat_var, y = "Count") +
+    scale_fill_manual(values = c("lightblue", "pink")) +
+    theme_minimal()
+})
+
+do.call(grid.arrange, c(categorical_plots, ncol = 2))
+
+# V6: Attrition by Job Role
+ggplot(data, aes(x = JobRole, fill = Attrition)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Attrition by Job Role", x = "Job Role", y = "Count") +
+  scale_fill_manual(values = c("lightblue", "pink")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+# Split Data into Training and Test Sets
+
+set.seed(123)  
+train_index <- createDataPartition(data$Attrition, p = 0.8, list = FALSE)
+train <- data[train_index, ]
+test <- data[-train_index, ]
+
+# Select Top 21 Features
+top_features <- names(train)[1:21]  # Replace with actual feature selection method
+train_top <- train %>% select(all_of(top_features), Attrition)
+test_top <- test %>% select(all_of(top_features), Attrition)
+
+# Modeling and Evaluation
+
+# 1.Random Forest
+set.seed(123)
+rf_model <- randomForest(Attrition ~ ., data = train_top, importance = TRUE)
+rf_predictions <- predict(rf_model, newdata = test_top)
+rf_accuracy <- confusionMatrix(rf_predictions, test_top$Attrition)$overall['Accuracy']
+
+# 2.Support Vector Machine (SVM)
+set.seed(123)
+svm_model <- svm(Attrition ~ ., data = train_top)
+svm_predictions <- predict(svm_model, newdata = test_top)
+svm_accuracy <- confusionMatrix(svm_predictions, test_top$Attrition)$overall['Accuracy']
+
+# Model Comparison
+accuracy_df <- data.frame(
+  Model = c("Random Forest", "SVM"),
+  Accuracy = c(rf_accuracy, svm_accuracy)
+)
+
+# Plot Model Comparison
+ggplot(accuracy_df, aes(x = Model, y = Accuracy, fill = Model)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Model Comparison by Accuracy", x = "Model", y = "Accuracy") +
+  theme_minimal()
+
+print(accuracy_df)
+
+# Identify Best Model
+best_model <- accuracy_df[which.max(accuracy_df$Accuracy), ]
+print(paste("Best Model: ", best_model$Model))
+
+# Confusion Matrix for Best Model
+best_predictions <- switch(
+  as.character(best_model$Model),
+  "Random Forest" = rf_predictions,
+  "SVM" = svm_predictions
+)
+best_model_confusion <- confusionMatrix(best_predictions, test_top$Attrition)
+print(best_model_confusion)
+
+# ROC Curves
+roc_rf <- roc(as.numeric(test_top$Attrition), as.numeric(rf_predictions))
+roc_svm <- roc(as.numeric(test_top$Attrition), as.numeric(svm_predictions))
+
+plot(roc_rf, col = "blue", lwd = 2, main = "ROC Curves for Models")
+lines(roc_svm, col = "green", lwd = 2)
+legend("bottomright", legend = c("Random Forest", "SVM"), 
+       col = c("blue", "green"), lwd = 2)
